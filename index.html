@@ -40,6 +40,7 @@
       font-size: 0.95rem;
     }
 
+    /* Panel de Búsqueda y Filtros */
     .search-panel {
       background-color: #1b2838;
       border: 1px solid #2a475e;
@@ -58,7 +59,7 @@
       flex-direction: column;
       gap: 6px;
       flex: 1;
-      min-width: 220px;
+      min-width: 180px;
     }
 
     .input-group label {
@@ -104,6 +105,7 @@
       color: #8f98a0;
     }
 
+    /* Resumen Financiero */
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -132,6 +134,7 @@
       color: #a3e035;
     }
 
+    /* Caja de Estado */
     .status-box {
       background-color: #0d121a;
       border: 1px dashed #2a475e;
@@ -143,6 +146,7 @@
       display: none;
     }
 
+    /* Grilla de Objetos */
     .inventory-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -167,6 +171,19 @@
       border-color: #66c0f4;
     }
 
+    .item-rank {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background-color: #171a21;
+      border: 1px solid #2a475e;
+      color: #66c0f4;
+      font-size: 0.7rem;
+      font-weight: bold;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
     .item-badge {
       position: absolute;
       top: 8px;
@@ -183,6 +200,7 @@
       width: 100px;
       height: 100px;
       object-fit: contain;
+      margin-top: 15px;
       margin-bottom: 10px;
     }
 
@@ -199,16 +217,23 @@
     }
 
     .item-price {
-      font-size: 0.95rem;
+      font-size: 1rem;
       font-weight: bold;
       color: #a3e035;
       margin-top: auto;
     }
 
+    .item-subprice {
+      font-size: 0.7rem;
+      color: #8f98a0;
+      margin-top: 3px;
+    }
+
     .item-total {
       font-size: 0.75rem;
-      color: #8f98a0;
-      margin-top: 2px;
+      color: #66c0f4;
+      font-weight: bold;
+      margin-top: 4px;
     }
   </style>
 </head>
@@ -217,7 +242,7 @@
   <div class="container">
     <header>
       <h1>🇵🇪 Valuador de Inventario Steam</h1>
-      <p>Calcula el valor en Soles Peruanos (S/.) de tu inventario público de Steam</p>
+      <p>Calcula el valor en Soles Peruanos (S/.) ordenado de mayor a menor precio</p>
     </header>
 
     <div class="search-panel">
@@ -233,6 +258,18 @@
           <option value="730,2">Counter-Strike 2 (CS2)</option>
           <option value="440,2">Team Fortress 2</option>
           <option value="753,6">Steam (Cromos y Objetos)</option>
+        </select>
+      </div>
+
+      <div class="input-group">
+        <label for="topLimitSelect">Mostrar en pantalla:</label>
+        <select id="topLimitSelect" onchange="updateDisplayGrid()">
+          <option value="10">Top 10 más caros</option>
+          <option value="25" selected>Top 25 más caros</option>
+          <option value="50">Top 50 más caros</option>
+          <option value="100">Top 100 más caros</option>
+          <option value="250">Top 250 más caros</option>
+          <option value="2000">Todos (Hasta 2000)</option>
         </select>
       </div>
 
@@ -260,8 +297,23 @@
   </div>
 
   <script>
-    // URL base limpia sin barras sobrantes
+    // URL base de tu Cloudflare Worker
     const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev".replace(/\/$/, "");
+
+    let currentItemsList = []; // Lista global de objetos procesados
+
+    // Función auxiliar para parsear montos en Soles (ej: "S/. 12,50", "1,250.00 PEN")
+    function parseSteamPrice(priceStr) {
+      if (!priceStr) return 0;
+      let clean = priceStr.replace(/S\/\.|\bPEN\b|S\//gi, '').trim();
+      
+      if (clean.includes(',') && clean.includes('.')) {
+        clean = clean.replace(/,/g, '');
+      } else if (clean.includes(',') && !clean.includes('.')) {
+        clean = clean.replace(',', '.');
+      }
+      return parseFloat(clean) || 0;
+    }
 
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
@@ -303,14 +355,14 @@
 
       const btn = document.getElementById('btnFetch');
       const statusBox = document.getElementById('statusBox');
-      const grid = document.getElementById('inventoryGrid');
 
       if (!rawInput) {
         alert("Por favor ingresa un usuario, enlace o SteamID64.");
         return;
       }
 
-      grid.innerHTML = '';
+      currentItemsList = [];
+      document.getElementById('inventoryGrid').innerHTML = '';
       document.getElementById('totalItems').textContent = '0';
       document.getElementById('marketableItems').textContent = '0';
       document.getElementById('totalValue').textContent = 'S/. 0.00';
@@ -323,7 +375,6 @@
         const steamId = await resolveSteamId64(rawInput);
         statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
-        // count=2000 es el límite máximo soportado por la API de inventarios de Steam
         const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=2000`;
         const invUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
@@ -365,7 +416,9 @@
                 hashName: hashName,
                 icon: desc.icon_url,
                 count: 1,
-                pricePEN: 0
+                pricePEN: 0,
+                lowestPriceStr: "S/. 0.00",
+                medianPriceStr: "S/. 0.00"
               };
             } else {
               itemGroups[hashName].count++;
@@ -376,15 +429,15 @@
         document.getElementById('totalItems').textContent = assets.length;
         document.getElementById('marketableItems').textContent = totalMarketableCount;
 
-        const uniqueItems = Object.values(itemGroups);
-        statusBox.textContent = `📦 Inventario cargado. Consultando mercado para ${uniqueItems.length} objetos únicos (S/.)...`;
+        currentItemsList = Object.values(itemGroups);
+        statusBox.textContent = `📦 Inventario cargado. Consultando precios de mercado para ${currentItemsList.length} objetos únicos (S/.)...`;
 
         let grandTotalPEN = 0;
         let processedCount = 0;
 
-        for (const item of uniqueItems) {
+        for (const item of currentItemsList) {
           processedCount++;
-          statusBox.textContent = `⏳ Precios (${processedCount}/${uniqueItems.length}): Consultando ${item.name}...`;
+          statusBox.textContent = `⏳ Obtención de precios (${processedCount}/${currentItemsList.length}): ${item.name}...`;
 
           const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
           const priceUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(marketUrl)}`;
@@ -393,27 +446,27 @@
             const priceRes = await fetch(priceUrl);
             if (priceRes.ok) {
               const priceData = await priceRes.json();
-              if (priceData.success && priceData.lowest_price) {
-                let rawPrice = priceData.lowest_price
-                  .replace("S/.", "")
-                  .replace("S/", "")
-                  .replace("PEN", "")
-                  .replace(",", ".")
-                  .trim();
-                
-                item.pricePEN = parseFloat(rawPrice) || 0;
+              if (priceData.success) {
+                const lowest = parseSteamPrice(priceData.lowest_price);
+                const median = parseSteamPrice(priceData.median_price);
+
+                // Asignar el valor más alto disponible entre precio más bajo y mediana reciente
+                item.pricePEN = Math.max(lowest, median) || lowest || median || 0;
+                item.lowestPriceStr = priceData.lowest_price || "N/A";
+                item.medianPriceStr = priceData.median_price || "N/A";
               }
             }
           } catch (e) {
             console.warn(`No se pudo obtener el precio para ${item.hashName}`);
           }
 
-          const itemTotal = item.pricePEN * item.count;
-          grandTotalPEN += itemTotal;
+          grandTotalPEN += item.pricePEN * item.count;
 
-          renderItemCard(item);
+          // Reordenar y actualizar la vista en tiempo real a medida que llegan los precios
+          updateDisplayGrid();
           document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
+          // Pausa de 1 segundo entre peticiones para no exceder los límites de Steam
           await new Promise(r => setTimeout(r, 1000));
         }
 
@@ -427,23 +480,38 @@
       }
     }
 
-    function renderItemCard(item) {
+    // Reordena los objetos de mayor a menor valor y los muestra según el límite seleccionado
+    function updateDisplayGrid() {
       const grid = document.getElementById('inventoryGrid');
-      const card = document.createElement('div');
-      card.className = 'item-card';
+      const limit = parseInt(document.getElementById('topLimitSelect').value, 10) || 25;
 
-      const imgUrl = `https://community.akamai.steamstatic.com/economy/image/${item.icon}/120fx120f`;
-      const totalPrice = (item.pricePEN * item.count).toFixed(2);
+      grid.innerHTML = '';
 
-      card.innerHTML = `
-        ${item.count > 1 ? `<div class="item-badge">x${item.count}</div>` : ''}
-        <img class="item-img" src="${imgUrl}" alt="${item.name}">
-        <div class="item-name" title="${item.name}">${item.name}</div>
-        <div class="item-price">S/. ${item.pricePEN.toFixed(2)}</div>
-        ${item.count > 1 ? `<div class="item-total">Total: S/. ${totalPrice}</div>` : ''}
-      `;
+      // Ordenar por precio unitario de mayor a menor
+      const sortedItems = [...currentItemsList].sort((a, b) => b.pricePEN - a.pricePEN);
+      const itemsToDisplay = sortedItems.slice(0, limit);
 
-      grid.appendChild(card);
+      itemsToDisplay.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'item-card';
+
+        const imgUrl = `https://community.akamai.steamstatic.com/economy/image/${item.icon}/120fx120f`;
+        const totalPrice = (item.pricePEN * item.count).toFixed(2);
+
+        card.innerHTML = `
+          <div class="item-rank">#${index + 1}</div>
+          ${item.count > 1 ? `<div class="item-badge">x${item.count}</div>` : ''}
+          <img class="item-img" src="${imgUrl}" alt="${item.name}">
+          <div class="item-name" title="${item.name}">${item.name}</div>
+          <div class="item-price">S/. ${item.pricePEN.toFixed(2)}</div>
+          <div class="item-subprice" title="Precio más bajo / Mediana en mercado">
+            Min: ${item.lowestPriceStr}
+          </div>
+          ${item.count > 1 ? `<div class="item-total">Total: S/. ${totalPrice}</div>` : ''}
+        `;
+
+        grid.appendChild(card);
+      });
     }
   </script>
 </body>
