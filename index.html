@@ -299,82 +299,47 @@
       }
     }
 
-    async function startValuation() {
-      let rawInput = document.getElementById('steamId').value.trim();
-      const gameVal = document.getElementById('gameSelect').value.split(',');
-      const appId = gameVal[0];
-      const contextId = gameVal[1];
+    async function resolveSteamId64(input) {
+  let cleaned = input.trim();
 
-      const btn = document.getElementById('btnFetch');
-      const statusBox = document.getElementById('statusBox');
-      const grid = document.getElementById('inventoryGrid');
+  // 1. Si el usuario ingresó un SteamID64 numérico de 17 dígitos directamente
+  if (/^\d{17}$/.test(cleaned)) return cleaned;
 
-      if (!rawInput) {
-        alert("Por favor ingresa un usuario, enlace o SteamID64.");
-        return;
-      }
+  // 2. Si ingresó una URL de tipo /profiles/76561198XXXXXXXXX
+  const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
+  if (profileMatch) return profileMatch[1];
 
-      grid.innerHTML = '';
-      document.getElementById('totalItems').textContent = '0';
-      document.getElementById('marketableItems').textContent = '0';
-      document.getElementById('totalValue').textContent = 'S/. 0.00';
-      
-      btn.disabled = true;
-      statusBox.style.display = 'block';
-      statusBox.textContent = '🔍 Identificando usuario y resolviendo SteamID64...';
+  // 3. Extraer el alias personalizado (ejemplo: "gabo459" de "https://steamcommunity.com/id/gabo459/")
+  let customName = cleaned
+    .split('?')[0]
+    .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
+    .replace(/\//g, '')
+    .trim();
 
-      try {
-        const steamId = await resolveSteamId64(rawInput);
-        statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
+  if (!customName) return null;
 
-        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`;
-        const invUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(steamUrl)}`;
-        const invRes = await fetch(invUrl);
+  // Consultar la página HTML principal del perfil vía Cloudflare (evita el error 400 de ?xml=1)
+  const profileUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/`)}`;
+  const response = await fetch(profileUrl);
 
-        if (!invRes.ok) {
-          throw new Error(`Error HTTP ${invRes.status}: Revisa que tu inventario sea público en la configuración de privacidad de Steam.`);
-        }
+  if (!response.ok) {
+    throw new Error(`Error HTTP ${response.status} al consultar el perfil '${customName}'. Revisa el nombre o la URL.`);
+  }
 
-        const invData = await invRes.json();
-        
-        if (!invData.assets || invData.assets.length === 0) {
-          statusBox.textContent = '⚠️ Este usuario no posee objetos en esta categoría o su inventario es privado.';
-          btn.disabled = false;
-          return;
-        }
+  const htmlText = await response.text();
 
-        const assets = invData.assets;
-        const descriptions = invData.descriptions;
+  // Extraer el SteamID64 directamente de los scripts internos del perfil de Steam
+  const match = htmlText.match(/"steamid"\s*:\s*"(\d{17})"/i) || 
+                htmlText.match(/g_rgProfileData\s*=\s*\{[^}]*"steamid"\s*:\s*"(\d{17})"/i) ||
+                htmlText.match(/steamcommunity\.com\/profiles\/(\d{17})/i) ||
+                htmlText.match(/g_steamID\s*=\s*"(\d{17})"/i);
 
-        const descMap = {};
-        descriptions.forEach(d => {
-          descMap[`${d.classid}_${d.instanceid || '0'}`] = d;
-        });
-
-        const itemGroups = {};
-        let totalMarketableCount = 0;
-
-        assets.forEach(asset => {
-          const key = `${asset.classid}_${asset.instanceid || '0'}`;
-          const desc = descMap[key];
-
-          if (desc && desc.marketable === 1) {
-            const hashName = desc.market_hash_name;
-            totalMarketableCount++;
-
-            if (!itemGroups[hashName]) {
-              itemGroups[hashName] = {
-                name: desc.name,
-                hashName: hashName,
-                icon: desc.icon_url,
-                count: 1,
-                pricePEN: 0
-              };
-            } else {
-              itemGroups[hashName].count++;
-            }
-          }
-        });
+  if (match && match[1]) {
+    return match[1];
+  } else {
+    throw new Error(`No se pudo encontrar el SteamID64 para '${customName}'. Verifica que el perfil exista y sea público.`);
+  }
+}
 
         document.getElementById('totalItems').textContent = assets.length;
         document.getElementById('marketableItems').textContent = totalMarketableCount;
