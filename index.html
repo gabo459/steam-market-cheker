@@ -260,20 +260,17 @@
   </div>
 
   <script>
-    // ⚠️ REEMPLAZA ESTA URL CON LA BASE DE TU CLOUDFLARE WORKER DEPLOYADO
-    const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev/";
+    // URL base limpia sin barras sobrantes
+    const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev".replace(/\/$/, "");
 
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
 
-      // 1. Si es un número directo de 17 dígitos
       if (/^\d{17}$/.test(cleaned)) return cleaned;
 
-      // 2. Si es una URL de tipo /profiles/76561198XXXXXXXXX
       const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
       if (profileMatch) return profileMatch[1];
 
-      // 3. Extraer el nombre personalizado (ej: "gabo459")
       let customName = cleaned
         .split('?')[0]
         .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
@@ -282,12 +279,11 @@
 
       if (!customName) return null;
 
-      // Consultar el endpoint oficial ISteamUser/ResolveVanityURL a través del Worker
       const vanityApiUrl = `${WORKER_BASE_URL}/?vanityurl=${encodeURIComponent(customName)}`;
       const response = await fetch(vanityApiUrl);
 
       if (!response.ok) {
-        throw new Error(`Error HTTP ${response.status} al consultar la API oficial de Steam.`);
+        throw new Error(`Error HTTP ${response.status} al resolver la URL del usuario.`);
       }
 
       const data = await response.json();
@@ -295,7 +291,7 @@
       if (data.response && data.response.success === 1) {
         return data.response.steamid;
       } else {
-        throw new Error(`No se pudo resolver el usuario '${customName}'. Verifica que el nombre esté bien escrito.`);
+        throw new Error(`No se pudo resolver el usuario '${customName}'. Verifica que esté bien escrito.`);
       }
     }
 
@@ -321,13 +317,14 @@
       
       btn.disabled = true;
       statusBox.style.display = 'block';
-      statusBox.textContent = '🔍 Resolviendo usuario mediante Steam Web API...';
+      statusBox.textContent = '🔍 Identificando usuario en Steam...';
 
       try {
         const steamId = await resolveSteamId64(rawInput);
         statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
-        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`;
+        // count=2000 es el límite máximo soportado por la API de inventarios de Steam
+        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=2000`;
         const invUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
 
