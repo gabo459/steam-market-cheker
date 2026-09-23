@@ -300,19 +300,29 @@
     // URL base de tu Cloudflare Worker
     const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev".replace(/\/$/, "");
 
-    let currentItemsList = []; // Lista global de objetos procesados
+    let currentItemsList = [];
 
-    // Función auxiliar para parsear montos en Soles (ej: "S/. 12,50", "1,250.00 PEN")
+    // Extracción ultra-robusta de montos numéricos
     function parseSteamPrice(priceStr) {
       if (!priceStr) return 0;
-      let clean = priceStr.replace(/S\/\.|\bPEN\b|S\//gi, '').trim();
       
-      if (clean.includes(',') && clean.includes('.')) {
-        clean = clean.replace(/,/g, '');
-      } else if (clean.includes(',') && !clean.includes('.')) {
-        clean = clean.replace(',', '.');
+      // Busca la secuencia numérica ignorando cualquier símbolo o espacio corrupto
+      const match = priceStr.match(/(\d+[\d.,]*)/);
+      if (!match) return 0;
+
+      let numStr = match[1];
+
+      if (numStr.includes(',') && numStr.includes('.')) {
+        if (numStr.indexOf(',') < numStr.indexOf('.')) {
+          numStr = numStr.replace(/,/g, '');
+        } else {
+          numStr = numStr.replace(/\./g, '').replace(',', '.');
+        }
+      } else if (numStr.includes(',')) {
+        numStr = numStr.replace(',', '.');
       }
-      return parseFloat(clean) || 0;
+
+      return parseFloat(numStr) || 0;
     }
 
     async function resolveSteamId64(input) {
@@ -417,8 +427,8 @@
                 icon: desc.icon_url,
                 count: 1,
                 pricePEN: 0,
-                lowestPriceStr: "S/. 0.00",
-                medianPriceStr: "S/. 0.00"
+                lowestVal: 0,
+                medianVal: 0
               };
             } else {
               itemGroups[hashName].count++;
@@ -430,14 +440,13 @@
         document.getElementById('marketableItems').textContent = totalMarketableCount;
 
         currentItemsList = Object.values(itemGroups);
-        statusBox.textContent = `📦 Inventario cargado. Consultando precios de mercado para ${currentItemsList.length} objetos únicos (S/.)...`;
+        statusBox.textContent = `📦 Inventario cargado. Consultando mercado para ${currentItemsList.length} objetos únicos (S/.)...`;
 
-        let grandTotalPEN = 0;
         let processedCount = 0;
 
         for (const item of currentItemsList) {
           processedCount++;
-          statusBox.textContent = `⏳ Obtención de precios (${processedCount}/${currentItemsList.length}): ${item.name}...`;
+          statusBox.textContent = `⏳ Precios (${processedCount}/${currentItemsList.length}): Consultando ${item.name}...`;
 
           const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
           const priceUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(marketUrl)}`;
@@ -450,27 +459,28 @@
                 const lowest = parseSteamPrice(priceData.lowest_price);
                 const median = parseSteamPrice(priceData.median_price);
 
-                // Asignar el valor más alto disponible entre precio más bajo y mediana reciente
+                item.lowestVal = lowest;
+                item.medianVal = median;
+                // Tomar el valor más alto disponible para reflejar el precio pico reciente
                 item.pricePEN = Math.max(lowest, median) || lowest || median || 0;
-                item.lowestPriceStr = priceData.lowest_price || "N/A";
-                item.medianPriceStr = priceData.median_price || "N/A";
               }
             }
           } catch (e) {
             console.warn(`No se pudo obtener el precio para ${item.hashName}`);
           }
 
-          grandTotalPEN += item.pricePEN * item.count;
+          // Recalcular el total acumulado con los precios válidos
+          const grandTotal = currentItemsList.reduce((acc, i) => acc + (i.pricePEN * i.count), 0);
+          document.getElementById('totalValue').textContent = `S/. ${grandTotal.toFixed(2)}`;
 
-          // Reordenar y actualizar la vista en tiempo real a medida que llegan los precios
+          // Reordenar en vivo de mayor a menor a medida que entran los precios
           updateDisplayGrid();
-          document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
-          // Pausa de 1 segundo entre peticiones para no exceder los límites de Steam
           await new Promise(r => setTimeout(r, 1000));
         }
 
-        statusBox.textContent = `✅ ¡Proceso completado! Valor total estimado: S/. ${grandTotalPEN.toFixed(2)}`;
+        const finalTotal = currentItemsList.reduce((acc, i) => acc + (i.pricePEN * i.count), 0);
+        statusBox.textContent = `✅ ¡Proceso completado! Valor total estimado: S/. ${finalTotal.toFixed(2)}`;
 
       } catch (err) {
         statusBox.textContent = `❌ Error: ${err.message}`;
@@ -480,14 +490,13 @@
       }
     }
 
-    // Reordena los objetos de mayor a menor valor y los muestra según el límite seleccionado
     function updateDisplayGrid() {
       const grid = document.getElementById('inventoryGrid');
       const limit = parseInt(document.getElementById('topLimitSelect').value, 10) || 25;
 
       grid.innerHTML = '';
 
-      // Ordenar por precio unitario de mayor a menor
+      // Ordenar la lista de mayor a menor valor unitario
       const sortedItems = [...currentItemsList].sort((a, b) => b.pricePEN - a.pricePEN);
       const itemsToDisplay = sortedItems.slice(0, limit);
 
@@ -504,8 +513,8 @@
           <img class="item-img" src="${imgUrl}" alt="${item.name}">
           <div class="item-name" title="${item.name}">${item.name}</div>
           <div class="item-price">S/. ${item.pricePEN.toFixed(2)}</div>
-          <div class="item-subprice" title="Precio más bajo / Mediana en mercado">
-            Min: ${item.lowestPriceStr}
+          <div class="item-subprice" title="Precio Mínimo / Precio Mediano">
+            Min: S/. ${item.lowestVal.toFixed(2)} | Med: S/. ${item.medianVal.toFixed(2)}
           </div>
           ${item.count > 1 ? `<div class="item-total">Total: S/. ${totalPrice}</div>` : ''}
         `;
