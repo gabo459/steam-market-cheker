@@ -260,29 +260,33 @@
   </div>
 
   <script>
-    // ⚠️ REEMPLAZA ESTA URL CON LA URL DE TU CLOUDFLARE WORKER DEPLOYADO
+    // ⚠️ COLOCA AQUÍ LA URL DE TU CLOUDFLARE WORKER DEPLOYADO
     const CLOUDFLARE_WORKER_URL = "https://market-steam.ernestoygabo.workers.dev/";
 
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
 
+      // Si el usuario introdujo directamente un SteamID64 de 17 dígitos
+      if (/^\d{17}$/.test(cleaned)) return cleaned;
+
       const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
       if (profileMatch) return profileMatch[1];
 
-      if (/^\d{17}$/.test(cleaned)) return cleaned;
-
+      // Extraer el alias personalizado
       let customName = cleaned
+        .split('?')[0]
         .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
         .replace(/\//g, '')
         .trim();
 
       if (!customName) return null;
 
+      // Consultar la vista XML del perfil a través del worker
       const xmlUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/?xml=1`)}`;
       const response = await fetch(xmlUrl);
 
       if (!response.ok) {
-        throw new Error("No se pudo conectar con el servidor proxy de Cloudflare.");
+        throw new Error(`Error HTTP ${response.status} al resolver el usuario '${customName}'.`);
       }
 
       const xmlText = await response.text();
@@ -291,7 +295,7 @@
       if (match && match[1]) {
         return match[1];
       } else {
-        throw new Error(`No se pudo resolver el usuario '${customName}'. Asegúrate de que el perfil exista y sea público.`);
+        throw new Error(`No se encontró un SteamID64 para '${customName}'. Verifica que el perfil exista y sea público.`);
       }
     }
 
@@ -317,7 +321,7 @@
       
       btn.disabled = true;
       statusBox.style.display = 'block';
-      statusBox.textContent = '🔍 Identificando usuario vía Cloudflare...';
+      statusBox.textContent = '🔍 Identificando usuario y resolviendo SteamID64...';
 
       try {
         const steamId = await resolveSteamId64(rawInput);
@@ -413,7 +417,6 @@
           renderItemCard(item);
           document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
-          // Pausa de 1 segundo para evitar saturar el mercado de Steam
           await new Promise(r => setTimeout(r, 1000));
         }
 
