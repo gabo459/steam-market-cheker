@@ -260,20 +260,20 @@
   </div>
 
   <script>
-    // ⚠️ ASEGÚRATE DE COLOCAR AQUÍ LA URL REAL DE TU CLOUDFLARE WORKER
-    const CLOUDFLARE_WORKER_URL = "https://market-steam.ernestoygabo.workers.dev/";
+    // ⚠️ REEMPLAZA ESTA URL CON LA BASE DE TU CLOUDFLARE WORKER DEPLOYADO
+    const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev/";
 
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
 
-      // 1. Si el usuario ingresó un SteamID64 numérico de 17 dígitos directamente
+      // 1. Si es un número directo de 17 dígitos
       if (/^\d{17}$/.test(cleaned)) return cleaned;
 
-      // 2. Si ingresó una URL de tipo /profiles/76561198XXXXXXXXX
+      // 2. Si es una URL de tipo /profiles/76561198XXXXXXXXX
       const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
       if (profileMatch) return profileMatch[1];
 
-      // 3. Extraer el alias personalizado (ejemplo: "gabo459" de "https://steamcommunity.com/id/gabo459/")
+      // 3. Extraer el nombre personalizado (ej: "gabo459")
       let customName = cleaned
         .split('?')[0]
         .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
@@ -282,26 +282,20 @@
 
       if (!customName) return null;
 
-      // Consultar la página HTML principal del perfil vía Cloudflare (evita el error 400 de ?xml=1)
-      const profileUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/`)}`;
-      const response = await fetch(profileUrl);
+      // Consultar el endpoint oficial ISteamUser/ResolveVanityURL a través del Worker
+      const vanityApiUrl = `${WORKER_BASE_URL}/?vanityurl=${encodeURIComponent(customName)}`;
+      const response = await fetch(vanityApiUrl);
 
       if (!response.ok) {
-        throw new Error(`Error HTTP ${response.status} al consultar el perfil '${customName}'. Revisa el nombre o la URL.`);
+        throw new Error(`Error HTTP ${response.status} al consultar la API oficial de Steam.`);
       }
 
-      const htmlText = await response.text();
+      const data = await response.json();
 
-      // Extraer el SteamID64 directamente de los scripts internos del perfil de Steam
-      const match = htmlText.match(/"steamid"\s*:\s*"(\d{17})"/i) || 
-                    htmlText.match(/g_rgProfileData\s*=\s*\{[^}]*"steamid"\s*:\s*"(\d{17})"/i) ||
-                    htmlText.match(/steamcommunity\.com\/profiles\/(\d{17})/i) ||
-                    htmlText.match(/g_steamID\s*=\s*"(\d{17})"/i);
-
-      if (match && match[1]) {
-        return match[1];
+      if (data.response && data.response.success === 1) {
+        return data.response.steamid;
       } else {
-        throw new Error(`No se pudo encontrar el SteamID64 para '${customName}'. Verifica que el perfil exista y sea público.`);
+        throw new Error(`No se pudo resolver el usuario '${customName}'. Verifica que el nombre esté bien escrito.`);
       }
     }
 
@@ -327,14 +321,14 @@
       
       btn.disabled = true;
       statusBox.style.display = 'block';
-      statusBox.textContent = '🔍 Identificando usuario y resolviendo SteamID64...';
+      statusBox.textContent = '🔍 Resolviendo usuario mediante Steam Web API...';
 
       try {
         const steamId = await resolveSteamId64(rawInput);
         statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
         const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`;
-        const invUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(steamUrl)}`;
+        const invUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
 
         if (!invRes.ok) {
@@ -396,7 +390,7 @@
           statusBox.textContent = `⏳ Precios (${processedCount}/${uniqueItems.length}): Consultando ${item.name}...`;
 
           const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
-          const priceUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(marketUrl)}`;
+          const priceUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(marketUrl)}`;
           
           try {
             const priceRes = await fetch(priceUrl);
@@ -423,7 +417,6 @@
           renderItemCard(item);
           document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
-          // Pausa de 1 segundo entre peticiones para evitar bloqueos del mercado de Steam
           await new Promise(r => setTimeout(r, 1000));
         }
 
