@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calculadora de Inventario Steam - Soles Peruanos (S/.)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #171a21;
+      color: #c6d4df;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+
+    header h1 {
+      color: #66c0f4;
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    header p {
+      color: #8f98a0;
+      font-size: 0.95rem;
+    }
+
+    /* Panel de Control */
+    .search-panel {
+      background-color: #1b2838;
+      border: 1px solid #2a475e;
+      border-radius: 8px;
+      padding: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      align-items: flex-end;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      margin-bottom: 25px;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .input-group label {
+      font-size: 0.85rem;
+      color: #66c0f4;
+      font-weight: bold;
+    }
+
+    input, select {
+      background-color: #0d121a;
+      border: 1px solid #2a475e;
+      color: #ffffff;
+      padding: 10px 12px;
+      border-radius: 5px;
+      outline: none;
+      font-size: 0.95rem;
+    }
+
+    input:focus, select:focus {
+      border-color: #66c0f4;
+    }
+
+    button {
+      background: linear-gradient(90deg, #47bfff 0%, #1a9fff 100%);
+      color: white;
+      border: none;
+      padding: 11px 24px;
+      border-radius: 5px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: opacity 0.2s;
+      height: 42px;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:disabled {
+      background: #2a475e;
+      cursor: not-allowed;
+      color: #8f98a0;
+    }
+
+    /* Resumen Financiero */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .summary-card {
+      background-color: #1b2838;
+      border: 1px solid #2a475e;
+      border-radius: 8px;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .summary-card h3 {
+      font-size: 0.85rem;
+      color: #8f98a0;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .summary-card .value {
+      font-size: 1.8rem;
+      font-weight: bold;
+      color: #a3e035;
+    }
+
+    /* Estado de Carga */
+    .status-box {
+      background-color: #0d121a;
+      border: 1px dashed #2a475e;
+      padding: 12px 18px;
+      border-radius: 6px;
+      margin-bottom: 25px;
+      font-size: 0.9rem;
+      color: #66c0f4;
+      display: none;
+    }
+
+    /* Galería de Objetos */
+    .inventory-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 15px;
+    }
+
+    .item-card {
+      background-color: #1b2838;
+      border: 1px solid #2a475e;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .item-card:hover {
+      transform: translateY(-3px);
+      border-color: #66c0f4;
+    }
+
+    .item-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background-color: #2a475e;
+      color: #ffffff;
+      font-size: 0.75rem;
+      font-weight: bold;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .item-img {
+      width: 100px;
+      height: 100px;
+      object-fit: contain;
+      margin-bottom: 10px;
+    }
+
+    .item-name {
+      font-size: 0.85rem;
+      color: #ffffff;
+      margin-bottom: 8px;
+      line-height: 1.2;
+      height: 32px;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .item-price {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: #a3e035;
+      margin-top: auto;
+    }
+
+    .item-total {
+      font-size: 0.75rem;
+      color: #8f98a0;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>🇵🇪 Valuador de Inventario Steam</h1>
+      <p>Calcula el valor en Soles Peruanos (S/.) de tu inventario público de Steam</p>
+    </header>
+
+    <!-- Formulario de Búsqueda -->
+    <div class="search-panel">
+      <div class="input-group">
+        <label for="steamId">SteamID64 del Usuario:</label>
+        <input type="text" id="steamId" placeholder="Ej: 76561198000000000" value="">
+      </div>
+
+      <div class="input-group">
+        <label for="gameSelect">Juego / Categoría:</label>
+        <select id="gameSelect">
+          <option value="570,2">Dota 2</option>
+          <option value="730,2">Counter-Strike 2 (CS2)</option>
+          <option value="440,2">Team Fortress 2</option>
+          <option value="753,6">Steam (Cromos y Objetos)</option>
+        </select>
+      </div>
+
+      <button id="btnFetch" onclick="startValuation()">Consultar Inventario</button>
+    </div>
+
+    <!-- Panel de Estado -->
+    <div class="status-box" id="statusBox">Esperando consulta...</div>
+
+    <!-- Resumen Financiero -->
+    <div class="summary-grid">
+      <div class="summary-card">
+        <h3>Total de Objetos</h3>
+        <div class="value" id="totalItems" style="color: #66c0f4;">0</div>
+      </div>
+      <div class="summary-card">
+        <h3>Objetos Comerciables</h3>
+        <div class="value" id="marketableItems" style="color: #ffffff;">0</div>
+      </div>
+      <div class="summary-card">
+        <h3>Valor Total Estimado</h3>
+        <div class="value" id="totalValue">S/. 0.00</div>
+      </div>
+    </div>
+
+    <!-- Lista de Objetos -->
+    <div class="inventory-grid" id="inventoryGrid"></div>
+  </div>
+
+  <script>
+    // Proxy CORS para permitir peticiones directas desde el navegador
+    const CORS_PROXY = "https://corsproxy.io/?";
+
+    async function startValuation() {
+      const steamId = document.getElementById('steamId').value.trim();
+      const gameVal = document.getElementById('gameSelect').value.split(',');
+      const appId = gameVal[0];
+      const contextId = gameVal[1];
+
+      const btn = document.getElementById('btnFetch');
+      const statusBox = document.getElementById('statusBox');
+      const grid = document.getElementById('inventoryGrid');
+
+      if (!steamId) {
+        alert("Por favor ingresa un SteamID64 válido.");
+        return;
+      }
+
+      // Reiniciar interfaz
+      grid.innerHTML = '';
+      document.getElementById('totalItems').textContent = '0';
+      document.getElementById('marketableItems').textContent = '0';
+      document.getElementById('totalValue').textContent = 'S/. 0.00';
+      
+      btn.disabled = true;
+      statusBox.style.display = 'block';
+      statusBox.textContent = '⏳ Cargando inventario desde Steam...';
+
+      try {
+        // 1. Consultar el inventario del usuario
+        const invUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`)}`;
+        const invRes = await fetch(invUrl);
+
+        if (!invRes.ok) {
+          throw new Error(`Error ${invRes.status}: Es posible que el inventario sea privado o el SteamID sea incorrecto.`);
+        }
+
+        const invData = await invRes.json();
+        
+        if (!invData.assets || invData.assets.length === 0) {
+          statusBox.textContent = '⚠️ Este usuario no posee objetos en este juego o el inventario es privado.';
+          btn.disabled = false;
+          return;
+        }
+
+        const assets = invData.assets;
+        const descriptions = invData.descriptions;
+
+        // Mapear descripciones
+        const descMap = {};
+        descriptions.forEach(d => {
+          descMap[`${d.classid}_${d.instanceid || '0'}`] = d;
+        });
+
+        // Contar frecuencia de objetos por market_hash_name
+        const itemGroups = {};
+        let totalMarketableCount = 0;
+
+        assets.forEach(asset => {
+          const key = `${asset.classid}_${asset.instanceid || '0'}`;
+          const desc = descMap[key];
+
+          if (desc && desc.marketable === 1) {
+            const hashName = desc.market_hash_name;
+            totalMarketableCount++;
+
+            if (!itemGroups[hashName]) {
+              itemGroups[hashName] = {
+                name: desc.name,
+                hashName: hashName,
+                icon: desc.icon_url,
+                count: 1,
+                pricePEN: 0
+              };
+            } else {
+              itemGroups[hashName].count++;
+            }
+          }
+        });
+
+        document.getElementById('totalItems').textContent = assets.length;
+        document.getElementById('marketableItems').textContent = totalMarketableCount;
+
+        const uniqueItems = Object.values(itemGroups);
+        statusBox.textContent = `📦 Inventario cargado. Consultando mercado de Steam para ${uniqueItems.length} objetos únicos (PEN S/.)...`;
+
+        let grandTotalPEN = 0;
+        let processedCount = 0;
+
+        // 2. Consultar precios uno a uno en el Mercado de Steam
+        for (const item of uniqueItems) {
+          processedCount++;
+          statusBox.textContent = `⏳ Precios: (${processedCount}/${uniqueItems.length}) Consultando: ${item.name}...`;
+
+          const priceUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${item.hashName}`)}`;
+          
+          try {
+            const priceRes = await fetch(priceUrl);
+            if (priceRes.ok) {
+              const priceData = await priceRes.json();
+              if (priceData.success && priceData.lowest_price) {
+                // Limpiar la cadena del precio devuelta por Steam (ej: "S/. 12,50" o "S/. 12.50")
+                let rawPrice = priceData.lowest_price
+                  .replace("S/.", "")
+                  .replace("S/", "")
+                  .replace("PEN", "")
+                  .replace(",", ".")
+                  .trim();
+                
+                item.pricePEN = parseFloat(rawPrice) || 0;
+              }
+            }
+          } catch (e) {
+            console.warn(`No se pudo obtener el precio para ${item.hashName}`);
+          }
+
+          const itemTotal = item.pricePEN * item.count;
+          grandTotalPEN += itemTotal;
+
+          // Renderizar tarjeta en la interfaz
+          renderItemCard(item);
+
+          // Actualizar valor total
+          document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
+
+          // Pausa obligatoria de 1.2 segundos para respetar el Rate Limit (HTTP 429) de Steam
+          await new Promise(r => setTimeout(r, 1200));
+        }
+
+        statusBox.textContent = `✅ ¡Proceso completado! Valor total del lote: S/. ${grandTotalPEN.toFixed(2)}`;
+
+      } catch (err) {
+        statusBox.textContent = `❌ Error: ${err.message}`;
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderItemCard(item) {
+      const grid = document.getElementById('inventoryGrid');
+      const card = document.createElement('div');
+      card.className = 'item-card';
+
+      const imgUrl = `https://community.akamai.steamstatic.com/economy/image/${item.icon}/120fx120f`;
+      const totalPrice = (item.pricePEN * item.count).toFixed(2);
+
+      card.innerHTML = `
+        ${item.count > 1 ? `<div class="item-badge">x${item.count}</div>` : ''}
+        <img class="item-img" src="${imgUrl}" alt="${item.name}">
+        <div class="item-name" title="${item.name}">${item.name}</div>
+        <div class="item-price">S/. ${item.pricePEN.toFixed(2)}</div>
+        ${item.count > 1 ? `<div class="item-total">Total: S/. ${totalPrice}</div>` : ''}
+      `;
+
+      grid.appendChild(card);
+    }
+  </script>
+</body>
+</html>
