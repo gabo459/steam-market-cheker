@@ -253,6 +253,7 @@
           <option value="570,2">Dota 2</option>
           <option value="730,2">Counter-Strike 2 (CS2)</option>
           <option value="440,2">Team Fortress 2</option>
+          <option value="753,6">Steam (Cromos y Objetos)</option>
         </select>
       </div>
 
@@ -293,11 +294,31 @@
 
   <script>
     const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev".replace(/\/$/, "");
-    
-    // Tasa de cambio de Dólar a Sol Peruano
-    const USD_TO_PEN = 3.75; 
+    const USD_TO_PEN = 3.75; // Tipo de cambio Dólar a Soles
 
     let currentItemsList = [];
+
+    // Extrae limpia y numéricamente cualquier respuesta en USD ($12.50 USD -> 12.50)
+    function parseUSDPrice(priceStr) {
+      if (!priceStr) return 0;
+      const match = priceStr.match(/([\d.,]+)/);
+      if (!match) return 0;
+      let valStr = match[1].replace(/,/g, '');
+      return parseFloat(valStr) || 0;
+    }
+
+    // Calcula un peso de rareza para consultar los ítems más caros PRIMERO
+    function getRarityWeight(desc) {
+      if (!desc) return 0;
+      let text = (desc.type || '') + ' ' + (desc.tags ? desc.tags.map(t => t.localized_tag_name || t.internal_name || '').join(' ') : '');
+      text = text.toLowerCase();
+      
+      if (text.includes('arcana') || text.includes('unusual') || text.includes('contraband') || text.includes('covert') || text.includes('knife') || text.includes('gloves') || text.includes('cuchillo') || text.includes('guantes')) return 100;
+      if (text.includes('immortal') || text.includes('inmortal') || text.includes('classified') || text.includes('extradirecto')) return 80;
+      if (text.includes('legendary') || text.includes('legendario') || text.includes('mythical') || text.includes('mítico') || text.includes('restricted')) return 60;
+      if (text.includes('rare') || text.includes('raro')) return 40;
+      return 10;
+    }
 
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
@@ -357,15 +378,8 @@
 
       try {
         const steamId = await resolveSteamId64(rawInput);
-        statusBox.textContent = `⏳ Descargando base de datos masiva de precios del mercado para ${appId === '570' ? 'Dota 2' : 'CS2'}...`;
-
-        // 1. Descargar base de precios masiva en 1 sola llamada (Evita bloqueo 429)
-        const bulkRes = await fetch(`${WORKER_BASE_URL}/?bulkprices=${appId}`);
-        const bulkData = await bulkRes.json();
-
         statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
-        // 2. Descargar inventario
         const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=english&count=2000`;
         const invUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
@@ -407,8 +421,9 @@
                 hashName: hashName,
                 icon: desc.icon_url,
                 count: 1,
+                priceUSD: 0,
                 pricePEN: 0,
-                priceUSD: 0
+                rarityWeight: getRarityWeight(desc)
               };
             } else {
               itemGroups[hashName].count++;
@@ -419,29 +434,64 @@
         document.getElementById('totalItems').textContent = assets.length;
         document.getElementById('marketableItems').textContent = totalMarketableCount;
 
-        currentItemsList = Object.values(itemGroups);
+        // Ordenar por peso de rareza para consultar los más caros primero
+        currentItemsList = Object.values(itemGroups).sort((a, b) => b.rarityWeight - a.rarityWeight);
 
-        // 3. Cruzar precios del inventario con la base masiva
-        let grandTotalPEN = 0;
+        statusBox.textContent = `📦 Inventario cargado. Consultando mercado oficial de Steam para ${currentItemsList.length} objetos (S/.)...`;
 
-        currentItemsList.forEach(item => {
-          const match = bulkData[item.hashName];
-          let usdVal = 0;
+        let processedCount = 0;
 
-          if (match) {
-            if (typeof match === 'number') usdVal = match;
-            else if (typeof match === 'object') usdVal = match.price || match.lowest_price || match.p || 0;
+        for (const item of currentItemsList) {
+          processedCount++;
+          statusBox.textContent = `⏳ Consultando precios (${processedCount}/${currentItemsList.length}): ${item.name}...`;
+
+          // currency=1 pide los precios en USD a Steam (100% confiable)
+          const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=1&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
+          const priceUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(marketUrl)}`;
+          
+          let success = false;
+          let retries = 0;
+
+          while (!success && retries < 2) {
+            try {
+              const priceRes = await fetch(priceUrl);
+              if (priceRes.status === 429) {
+                // Si Steam solicita pausa por límite de peticiones, esperar 3 segundos
+                statusBox.textContent = `⏳ Pausa anti-bloqueo de Steam... reanudando en 3s (${processedCount}/${currentItemsList.length})`;
+                await new Promise(r => setTimeout(r, 3000));
+                retries++;
+                continue;
+              }
+
+              if (priceRes.ok) {
+                const priceData = await priceRes.json();
+                if (priceData.success) {
+                  const lowest = parseUSDPrice(priceData.lowest_price);
+                  const median = parseUSDPrice(priceData.median_price);
+
+                  item.priceUSD = Math.max(lowest, median) || lowest || median || 0;
+                  item.pricePEN = item.priceUSD * USD_TO_PEN;
+                  success = true;
+                }
+              }
+            } catch (e) {
+              console.warn(`Error al consultar ${item.hashName}`);
+            }
+            retries++;
           }
 
-          item.priceUSD = usdVal;
-          item.pricePEN = usdVal * USD_TO_PEN;
-          grandTotalPEN += item.pricePEN * item.count;
-        });
+          // Recalcular total acumulado e ir actualizando la pantalla en tiempo real
+          const grandTotal = currentItemsList.reduce((acc, i) => acc + (i.pricePEN * i.count), 0);
+          document.getElementById('totalValue').textContent = `S/. ${grandTotal.toFixed(2)}`;
 
-        // 4. Mostrar resultados ordenados de mayor a menor instante
-        updateDisplayGrid();
-        document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
-        statusBox.textContent = `✅ ¡Valuación completada! Se procesaron ${currentItemsList.length} objetos únicos en Soles (S/.).`;
+          updateDisplayGrid();
+
+          // Pausa normal de 1.1 segundos entre peticiones
+          await new Promise(r => setTimeout(r, 1100));
+        }
+
+        const finalTotal = currentItemsList.reduce((acc, i) => acc + (i.pricePEN * i.count), 0);
+        statusBox.textContent = `✅ ¡Valuación completada! Valor total estimado: S/. ${finalTotal.toFixed(2)}`;
 
       } catch (err) {
         statusBox.textContent = `❌ Error: ${err.message}`;
@@ -457,7 +507,7 @@
 
       grid.innerHTML = '';
 
-      // Ordenar por precio de mayor a menor
+      // Reordenar los ítems en pantalla de mayor a menor precio
       const sortedItems = [...currentItemsList].sort((a, b) => b.pricePEN - a.pricePEN);
       const itemsToDisplay = sortedItems.slice(0, limit);
 
@@ -474,7 +524,7 @@
           <img class="item-img" src="${imgUrl}" alt="${item.name}">
           <div class="item-name" title="${item.name}">${item.name}</div>
           <div class="item-price">S/. ${item.pricePEN.toFixed(2)}</div>
-          <div class="item-subprice" title="Precio estimado en USD">
+          <div class="item-subprice" title="Precio estimado en Dólares">
             USD $${item.priceUSD.toFixed(2)}
           </div>
           ${item.count > 1 ? `<div class="item-total">Total: S/. ${totalPrice}</div>` : ''}
