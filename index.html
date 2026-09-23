@@ -260,20 +260,17 @@
   </div>
 
   <script>
-    const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+    // ⚠️ REEMPLAZA ESTA URL CON LA URL DE TU CLOUDFLARE WORKER DEPLOYADO
+    const CLOUDFLARE_WORKER_URL = "https://steam-cors-proxy.TU-SUBDOMINIO.workers.dev/?url=";
 
-    // Función encargada de transformar cualquier entrada (URL, usuario o ID) a un SteamID64 numérico
     async function resolveSteamId64(input) {
       let cleaned = input.trim();
 
-      // 1. Si es un enlace de perfil numérico directo (ej: .../profiles/76561198XXXXXXXXX)
       const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
       if (profileMatch) return profileMatch[1];
 
-      // 2. Si ya es directamente un número de 17 dígitos
       if (/^\d{17}$/.test(cleaned)) return cleaned;
 
-      // 3. Si es una URL personalizada (ej: .../id/gabo459) o simplemente el nombre personalizado ("gabo459")
       let customName = cleaned
         .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
         .replace(/\//g, '')
@@ -281,12 +278,11 @@
 
       if (!customName) return null;
 
-      // Consultar la vista XML del perfil en Steam a través del proxy
-      const xmlUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/?xml=1`)}`;
+      const xmlUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/?xml=1`)}`;
       const response = await fetch(xmlUrl);
 
       if (!response.ok) {
-        throw new Error("No se pudo conectar con Steam para verificar el usuario personalizado.");
+        throw new Error("No se pudo conectar con el servidor proxy de Cloudflare.");
       }
 
       const xmlText = await response.text();
@@ -295,7 +291,7 @@
       if (match && match[1]) {
         return match[1];
       } else {
-        throw new Error(`No se pudo resolver el nombre '${customName}'. Revisa que el perfil exista y sea público.`);
+        throw new Error(`No se pudo resolver el usuario '${customName}'. Asegúrate de que el perfil exista y sea público.`);
       }
     }
 
@@ -314,7 +310,6 @@
         return;
       }
 
-      // Reiniciar la interfaz
       grid.innerHTML = '';
       document.getElementById('totalItems').textContent = '0';
       document.getElementById('marketableItems').textContent = '0';
@@ -322,25 +317,24 @@
       
       btn.disabled = true;
       statusBox.style.display = 'block';
-      statusBox.textContent = '🔍 Identificando usuario y obteniendo SteamID64...';
+      statusBox.textContent = '🔍 Identificando usuario vía Cloudflare...';
 
       try {
-        // Transformar la entrada a SteamID64 numérico
         const steamId = await resolveSteamId64(rawInput);
-        statusBox.textContent = `⏳ Usuario identificado (${steamId}). Cargando inventario desde Steam...`;
+        statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
         const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`;
-        const invUrl = `${CORS_PROXY}${encodeURIComponent(steamUrl)}`;
+        const invUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
 
         if (!invRes.ok) {
-          throw new Error(`Error HTTP ${invRes.status}: Es posible que el inventario esté privado en la configuración del perfil de Steam.`);
+          throw new Error(`Error HTTP ${invRes.status}: Revisa que tu inventario sea público en la configuración de privacidad de Steam.`);
         }
 
         const invData = await invRes.json();
         
         if (!invData.assets || invData.assets.length === 0) {
-          statusBox.textContent = '⚠️ Este usuario no posee objetos en este juego o el inventario está configurado como privado.';
+          statusBox.textContent = '⚠️ Este usuario no posee objetos en esta categoría o su inventario es privado.';
           btn.disabled = false;
           return;
         }
@@ -382,7 +376,7 @@
         document.getElementById('marketableItems').textContent = totalMarketableCount;
 
         const uniqueItems = Object.values(itemGroups);
-        statusBox.textContent = `📦 Inventario cargado. Consultando precios del mercado para ${uniqueItems.length} objetos únicos (S/.)...`;
+        statusBox.textContent = `📦 Inventario cargado. Consultando mercado para ${uniqueItems.length} objetos únicos (S/.)...`;
 
         let grandTotalPEN = 0;
         let processedCount = 0;
@@ -392,7 +386,7 @@
           statusBox.textContent = `⏳ Precios (${processedCount}/${uniqueItems.length}): Consultando ${item.name}...`;
 
           const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
-          const priceUrl = `${CORS_PROXY}${encodeURIComponent(marketUrl)}`;
+          const priceUrl = `${CLOUDFLARE_WORKER_URL}${encodeURIComponent(marketUrl)}`;
           
           try {
             const priceRes = await fetch(priceUrl);
@@ -419,7 +413,8 @@
           renderItemCard(item);
           document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
-          await new Promise(r => setTimeout(r, 1200));
+          // Pausa de 1 segundo para evitar saturar el mercado de Steam
+          await new Promise(r => setTimeout(r, 1000));
         }
 
         statusBox.textContent = `✅ ¡Proceso completado! Valor total estimado: S/. ${grandTotalPEN.toFixed(2)}`;
