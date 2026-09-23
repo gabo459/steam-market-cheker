@@ -40,7 +40,6 @@
       font-size: 0.95rem;
     }
 
-    /* Panel de Búsqueda y Filtros */
     .search-panel {
       background-color: #1b2838;
       border: 1px solid #2a475e;
@@ -105,7 +104,6 @@
       color: #8f98a0;
     }
 
-    /* Resumen Financiero */
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -134,7 +132,6 @@
       color: #a3e035;
     }
 
-    /* Caja de Estado */
     .status-box {
       background-color: #0d121a;
       border: 1px dashed #2a475e;
@@ -146,7 +143,6 @@
       display: none;
     }
 
-    /* Grilla de Objetos */
     .inventory-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -297,17 +293,18 @@
   </div>
 
   <script>
-    // URL base de tu Cloudflare Worker
     const WORKER_BASE_URL = "https://market-steam.ernestoygabo.workers.dev".replace(/\/$/, "");
 
     let currentItemsList = [];
 
-    // Extracción ultra-robusta de montos numéricos
+    // Extracción limpia de precios soportando espacios invisibles de Steam
     function parseSteamPrice(priceStr) {
       if (!priceStr) return 0;
       
-      // Busca la secuencia numérica ignorando cualquier símbolo o espacio corrupto
-      const match = priceStr.match(/(\d+[\d.,]*)/);
+      // Limpiar espacios no rompibles (nbsp) e invisibles
+      let cleanStr = priceStr.replace(/[\u00a0\r\n]/g, ' ').trim();
+
+      const match = cleanStr.match(/(\d+[\d.,]*)/);
       if (!match) return 0;
 
       let numStr = match[1];
@@ -385,7 +382,8 @@
         const steamId = await resolveSteamId64(rawInput);
         statusBox.textContent = `⏳ Usuario verificado (${steamId}). Cargando inventario...`;
 
-        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=2000`;
+        // IMPORTANTE: l=english asegura que market_hash_name venga siempre en inglés, como requiere el Mercado
+        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=english&count=2000`;
         const invUrl = `${WORKER_BASE_URL}/?url=${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
 
@@ -461,7 +459,6 @@
 
                 item.lowestVal = lowest;
                 item.medianVal = median;
-                // Tomar el valor más alto disponible para reflejar el precio pico reciente
                 item.pricePEN = Math.max(lowest, median) || lowest || median || 0;
               }
             }
@@ -469,11 +466,9 @@
             console.warn(`No se pudo obtener el precio para ${item.hashName}`);
           }
 
-          // Recalcular el total acumulado con los precios válidos
           const grandTotal = currentItemsList.reduce((acc, i) => acc + (i.pricePEN * i.count), 0);
           document.getElementById('totalValue').textContent = `S/. ${grandTotal.toFixed(2)}`;
 
-          // Reordenar en vivo de mayor a menor a medida que entran los precios
           updateDisplayGrid();
 
           await new Promise(r => setTimeout(r, 1000));
@@ -496,7 +491,6 @@
 
       grid.innerHTML = '';
 
-      // Ordenar la lista de mayor a menor valor unitario
       const sortedItems = [...currentItemsList].sort((a, b) => b.pricePEN - a.pricePEN);
       const itemsToDisplay = sortedItems.slice(0, limit);
 
