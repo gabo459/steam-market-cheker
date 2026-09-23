@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Calculadora de Inventario Steam - Soles Peruanos (S/.)</title>
+  <title>Valuador de Inventario Steam - Soles Peruanos (S/.)</title>
   <style>
     * {
       box-sizing: border-box;
@@ -40,7 +40,6 @@
       font-size: 0.95rem;
     }
 
-    /* Panel de Control */
     .search-panel {
       background-color: #1b2838;
       border: 1px solid #2a475e;
@@ -59,7 +58,7 @@
       flex-direction: column;
       gap: 6px;
       flex: 1;
-      min-width: 200px;
+      min-width: 220px;
     }
 
     .input-group label {
@@ -105,7 +104,6 @@
       color: #8f98a0;
     }
 
-    /* Resumen Financiero */
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -134,7 +132,6 @@
       color: #a3e035;
     }
 
-    /* Estado de Carga */
     .status-box {
       background-color: #0d121a;
       border: 1px dashed #2a475e;
@@ -146,7 +143,6 @@
       display: none;
     }
 
-    /* Galería de Objetos */
     .inventory-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -224,11 +220,10 @@
       <p>Calcula el valor en Soles Peruanos (S/.) de tu inventario público de Steam</p>
     </header>
 
-    <!-- Formulario de Búsqueda -->
     <div class="search-panel">
       <div class="input-group">
-        <label for="steamId">SteamID64 del Usuario:</label>
-        <input type="text" id="steamId" placeholder="Ej: 76561198000000000" value="">
+        <label for="steamId">Perfil de Steam (URL, usuario o ID):</label>
+        <input type="text" id="steamId" placeholder="Ej: gabo459, 76561198... o URL completa">
       </div>
 
       <div class="input-group">
@@ -244,10 +239,8 @@
       <button id="btnFetch" onclick="startValuation()">Consultar Inventario</button>
     </div>
 
-    <!-- Panel de Estado -->
     <div class="status-box" id="statusBox">Esperando consulta...</div>
 
-    <!-- Resumen Financiero -->
     <div class="summary-grid">
       <div class="summary-card">
         <h3>Total de Objetos</h3>
@@ -263,16 +256,51 @@
       </div>
     </div>
 
-    <!-- Lista de Objetos -->
     <div class="inventory-grid" id="inventoryGrid"></div>
   </div>
 
   <script>
-    // Proxy CORS para permitir peticiones directas desde el navegador
-    const CORS_PROXY = "https://corsproxy.io/?";
+    const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+
+    // Función encargada de transformar cualquier entrada (URL, usuario o ID) a un SteamID64 numérico
+    async function resolveSteamId64(input) {
+      let cleaned = input.trim();
+
+      // 1. Si es un enlace de perfil numérico directo (ej: .../profiles/76561198XXXXXXXXX)
+      const profileMatch = cleaned.match(/steamcommunity\.com\/profiles\/(\d{17})/);
+      if (profileMatch) return profileMatch[1];
+
+      // 2. Si ya es directamente un número de 17 dígitos
+      if (/^\d{17}$/.test(cleaned)) return cleaned;
+
+      // 3. Si es una URL personalizada (ej: .../id/gabo459) o simplemente el nombre personalizado ("gabo459")
+      let customName = cleaned
+        .replace(/https?:\/\/steamcommunity\.com\/id\//, '')
+        .replace(/\//g, '')
+        .trim();
+
+      if (!customName) return null;
+
+      // Consultar la vista XML del perfil en Steam a través del proxy
+      const xmlUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/id/${customName}/?xml=1`)}`;
+      const response = await fetch(xmlUrl);
+
+      if (!response.ok) {
+        throw new Error("No se pudo conectar con Steam para verificar el usuario personalizado.");
+      }
+
+      const xmlText = await response.text();
+      const match = xmlText.match(/<steamID64>\s*(\d{17})\s*<\/steamID64>/);
+
+      if (match && match[1]) {
+        return match[1];
+      } else {
+        throw new Error(`No se pudo resolver el nombre '${customName}'. Revisa que el perfil exista y sea público.`);
+      }
+    }
 
     async function startValuation() {
-      const steamId = document.getElementById('steamId').value.trim();
+      let rawInput = document.getElementById('steamId').value.trim();
       const gameVal = document.getElementById('gameSelect').value.split(',');
       const appId = gameVal[0];
       const contextId = gameVal[1];
@@ -281,12 +309,12 @@
       const statusBox = document.getElementById('statusBox');
       const grid = document.getElementById('inventoryGrid');
 
-      if (!steamId) {
-        alert("Por favor ingresa un SteamID64 válido.");
+      if (!rawInput) {
+        alert("Por favor ingresa un usuario, enlace o SteamID64.");
         return;
       }
 
-      // Reiniciar interfaz
+      // Reiniciar la interfaz
       grid.innerHTML = '';
       document.getElementById('totalItems').textContent = '0';
       document.getElementById('marketableItems').textContent = '0';
@@ -294,21 +322,25 @@
       
       btn.disabled = true;
       statusBox.style.display = 'block';
-      statusBox.textContent = '⏳ Cargando inventario desde Steam...';
+      statusBox.textContent = '🔍 Identificando usuario y obteniendo SteamID64...';
 
       try {
-        // 1. Consultar el inventario del usuario
-        const invUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`)}`;
+        // Transformar la entrada a SteamID64 numérico
+        const steamId = await resolveSteamId64(rawInput);
+        statusBox.textContent = `⏳ Usuario identificado (${steamId}). Cargando inventario desde Steam...`;
+
+        const steamUrl = `https://steamcommunity.com/inventory/${steamId}/${appId}/${contextId}?l=spanish&count=5000`;
+        const invUrl = `${CORS_PROXY}${encodeURIComponent(steamUrl)}`;
         const invRes = await fetch(invUrl);
 
         if (!invRes.ok) {
-          throw new Error(`Error ${invRes.status}: Es posible que el inventario sea privado o el SteamID sea incorrecto.`);
+          throw new Error(`Error HTTP ${invRes.status}: Es posible que el inventario esté privado en la configuración del perfil de Steam.`);
         }
 
         const invData = await invRes.json();
         
         if (!invData.assets || invData.assets.length === 0) {
-          statusBox.textContent = '⚠️ Este usuario no posee objetos en este juego o el inventario es privado.';
+          statusBox.textContent = '⚠️ Este usuario no posee objetos en este juego o el inventario está configurado como privado.';
           btn.disabled = false;
           return;
         }
@@ -316,13 +348,11 @@
         const assets = invData.assets;
         const descriptions = invData.descriptions;
 
-        // Mapear descripciones
         const descMap = {};
         descriptions.forEach(d => {
           descMap[`${d.classid}_${d.instanceid || '0'}`] = d;
         });
 
-        // Contar frecuencia de objetos por market_hash_name
         const itemGroups = {};
         let totalMarketableCount = 0;
 
@@ -352,24 +382,23 @@
         document.getElementById('marketableItems').textContent = totalMarketableCount;
 
         const uniqueItems = Object.values(itemGroups);
-        statusBox.textContent = `📦 Inventario cargado. Consultando mercado de Steam para ${uniqueItems.length} objetos únicos (PEN S/.)...`;
+        statusBox.textContent = `📦 Inventario cargado. Consultando precios del mercado para ${uniqueItems.length} objetos únicos (S/.)...`;
 
         let grandTotalPEN = 0;
         let processedCount = 0;
 
-        // 2. Consultar precios uno a uno en el Mercado de Steam
         for (const item of uniqueItems) {
           processedCount++;
-          statusBox.textContent = `⏳ Precios: (${processedCount}/${uniqueItems.length}) Consultando: ${item.name}...`;
+          statusBox.textContent = `⏳ Precios (${processedCount}/${uniqueItems.length}): Consultando ${item.name}...`;
 
-          const priceUrl = `${CORS_PROXY}${encodeURIComponent(`https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${item.hashName}`)}`;
+          const marketUrl = `https://steamcommunity.com/market/priceoverview/?currency=35&appid=${appId}&market_hash_name=${encodeURIComponent(item.hashName)}`;
+          const priceUrl = `${CORS_PROXY}${encodeURIComponent(marketUrl)}`;
           
           try {
             const priceRes = await fetch(priceUrl);
             if (priceRes.ok) {
               const priceData = await priceRes.json();
               if (priceData.success && priceData.lowest_price) {
-                // Limpiar la cadena del precio devuelta por Steam (ej: "S/. 12,50" o "S/. 12.50")
                 let rawPrice = priceData.lowest_price
                   .replace("S/.", "")
                   .replace("S/", "")
@@ -387,17 +416,13 @@
           const itemTotal = item.pricePEN * item.count;
           grandTotalPEN += itemTotal;
 
-          // Renderizar tarjeta en la interfaz
           renderItemCard(item);
-
-          // Actualizar valor total
           document.getElementById('totalValue').textContent = `S/. ${grandTotalPEN.toFixed(2)}`;
 
-          // Pausa obligatoria de 1.2 segundos para respetar el Rate Limit (HTTP 429) de Steam
           await new Promise(r => setTimeout(r, 1200));
         }
 
-        statusBox.textContent = `✅ ¡Proceso completado! Valor total del lote: S/. ${grandTotalPEN.toFixed(2)}`;
+        statusBox.textContent = `✅ ¡Proceso completado! Valor total estimado: S/. ${grandTotalPEN.toFixed(2)}`;
 
       } catch (err) {
         statusBox.textContent = `❌ Error: ${err.message}`;
